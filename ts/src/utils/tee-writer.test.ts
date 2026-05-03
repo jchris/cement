@@ -79,16 +79,20 @@ describe("teeWriter", () => {
 
   it("returns Err when all peers fail during the stream", async () => {
     const ps1 = makePeerStream({
-      write: vi.fn<(chunk: Uint8Array) => Promise<void>>().mockRejectedValue(new Error("fail")),
+      write: vi.fn<(chunk: Uint8Array) => Promise<void>>().mockRejectedValue(new Error("disk full on peer 0")),
     });
     const ps2 = makePeerStream({
-      write: vi.fn<(chunk: Uint8Array) => Promise<void>>().mockRejectedValue(new Error("fail")),
+      write: vi.fn<(chunk: Uint8Array) => Promise<void>>().mockRejectedValue(new Error("network reset on peer 1")),
     });
 
     const result = await teeWriter([makePeer(ps1), makePeer(ps2)], uint8array2stream(chunk1));
 
     expect(result.isErr()).toBe(true);
     expect(result.Err().message).toMatch(/all peers failed/);
+    expect(result.Err().message).toContain("disk full on peer 0");
+    expect(result.Err().message).toContain("network reset on peer 1");
+    expect(result.Err().message).toContain("peer 0:");
+    expect(result.Err().message).toContain("peer 1:");
   });
 
   it("returns the first peer on an empty stream", async () => {
@@ -106,12 +110,17 @@ describe("teeWriter", () => {
   });
 
   it("returns Err when all peers fail on begin", async () => {
-    const failPeer: Peer = { begin: vi.fn<() => Promise<Result<PeerStream>>>().mockRejectedValue(new Error("begin failed")) };
+    const failPeer0: Peer = { begin: vi.fn<() => Promise<Result<PeerStream>>>().mockRejectedValue(new Error("begin auth denied")) };
+    const failPeer1: Peer = { begin: vi.fn<() => Promise<Result<PeerStream>>>().mockRejectedValue(new Error("begin dns lookup")) };
 
-    const result = await teeWriter([failPeer, failPeer], uint8array2stream(chunk1));
+    const result = await teeWriter([failPeer0, failPeer1], uint8array2stream(chunk1));
 
     expect(result.isErr()).toBe(true);
     expect(result.Err().message).toMatch(/all peers failed/);
+    expect(result.Err().message).toContain("begin auth denied");
+    expect(result.Err().message).toContain("begin dns lookup");
+    expect(result.Err().message).toContain("peer 0:");
+    expect(result.Err().message).toContain("peer 1:");
   });
 
   it("survives when some peers fail on begin", async () => {

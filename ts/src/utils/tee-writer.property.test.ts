@@ -957,3 +957,56 @@ describe("teeWriter lifecycle", () => {
     );
   }, 30_000);
 });
+
+// ---------------------------------------------------------------------------
+// Error-detail invariants
+// ---------------------------------------------------------------------------
+
+describe("teeWriter error detail", () => {
+  // Property 28: when all peers fail writes with distinct messages, the
+  // collapsed Err preserves each peer's message (and references its index)
+  it("collapsed write-failure Err contains each peer's distinct error message", async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.uniqueArray(
+          fc.string({ minLength: 4, maxLength: 24 }).filter((s) => /^[A-Za-z0-9 _-]+$/.test(s)),
+          {
+            minLength: 2,
+            maxLength: 5,
+          },
+        ),
+        async (messages) => {
+          const peers: Peer[] = messages.map(
+            (msg) =>
+              ({
+                async begin(): Promise<Result<PeerStream>> {
+                  return Result.Ok({
+                    write(): Promise<void> {
+                      return Promise.reject(new Error(msg));
+                    },
+                    cancel(): Promise<void> {
+                      return Promise.resolve();
+                    },
+                    close(): Promise<void> {
+                      return Promise.resolve();
+                    },
+                  });
+                },
+              }) satisfies Peer,
+          );
+
+          const result = await teeWriter(peers, makeStream([new Uint8Array([1, 2, 3])]), { peerTimeout: TIMEOUT });
+
+          expect(result.isErr()).toBe(true);
+          const errMsg = result.Err().message;
+          expect(errMsg).toMatch(/all peers failed/);
+          for (let i = 0; i < messages.length; i++) {
+            expect(errMsg).toContain(messages[i]);
+            expect(errMsg).toContain(`peer ${i}:`);
+          }
+        },
+      ),
+      { numRuns: 50 },
+    );
+  });
+});
